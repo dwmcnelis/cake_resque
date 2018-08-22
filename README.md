@@ -7,6 +7,8 @@ those jobs on one or more queues, and processing them later.
 
 This plugin wraps the libary [dwmcnelis/resque](https://github.com/dwmcnelis/resque).
 
+This library is a fork of [wa0x6e/Cake-Resque](https://github.com/wa0x6e/Cake-Resque).
+
 ## Requirements
 
 * PHP 5.3+
