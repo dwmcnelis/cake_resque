@@ -168,7 +168,7 @@ class CakeResque
 			$caller = debug_backtrace();
 		}
 
-		self::$logger->debug('queue: {queue}, class: {class}, args: {args}, jobId: {jobId}, caller: {caller}', array(
+		self::$logger->log('debug','queue: {queue}, class: {class}, args: {args}, jobId: {jobId}, caller: {caller}', array(
 			'queue'  => $queue,
 			'class'  => $class,
 			'args'   => json_encode($args),
