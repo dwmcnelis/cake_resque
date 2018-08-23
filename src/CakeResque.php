@@ -2,34 +2,6 @@
 namespace CakeResque;
 
 /**
- * CakeResque Lib File
- *
- * Proxy class to Resque
- *
- * PHP version 5
- *
- * Licensed under The MIT License
- * Redistributions of files must retain the above copyright notice.
- *
- * @author        Wan Qi Chen <kami@kamisama.me>
- * @copyright     Copyright 2012, Wan Qi Chen <kami@kamisama.me>
- * @link          http://cakeresque.kamisama.me
- * @package       CakeResque
- * @subpackage      CakeResque.Lib
- * @since         1.2.0
- * @license       MIT License (http://www.opensource.org/licenses/mit-license.php)
- */
-
-use Cake\Core\Configure;
-use Cake\Filesystem\File;
-use Cake\Filesystem\Folder;
-use Resque;
-use Resque_Failure_Redis;
-use Resque_Job_Status;
-use Resque_Worker;
-
-
-/**
  * CakeResque Class
  *
  * Proxy to Resque, enabling logging function
@@ -37,347 +9,174 @@ use Resque_Worker;
 class CakeResque
 {
 
-    /**
-     * Array containing all the queuing activity.
-     *
-     * Actually needed for testing purposes and DebugKitEx plugin.
-     *
-     * @var array
-     */
-    public static $logs = [];
+	/**
+	 * Resque classname.
+	 *
+	 * @var string
+	 */
+	public static $resqueClass = 'Resque\Resque';
 
-    /**
-     * Resque classname.
-     *
-     * Actually needed for testing purposes.
-     *
-     * @var string
-     */
-    public static $resqueClass = 'Resque';
+	/**
+	 * Redis instance.
+	 *
+	 * @var Predis\Client
+	 */
+	public static $redis = null;
 
-    /**
-     * ResqueScheduler classname.
-     *
-     * Actually needed for testing purposes.
-     *
-     * @var string
-     */
-    public static $resqueSchedulerClass = 'ResqueScheduler\ResqueScheduler';
+	/**
+	 * Logger instance.
+	 *
+	 * @var Resque\Logger
+	 */
+	public static $logger = null;
 
-    /**
-     * Initialization.
-     *
-     * It loads the required classes for web and cli environments.
-     *
-     * @param array $config Configuration options.
-     * @throws ConfigureException if needed configuration parameters are not found.
-     * @return void
-     */
-    public static function init($config = null)
-    {
-        self::loadConfig($config);
+	/**
+	 * Resque instance.
+	 *
+	 * @var Resque\Resque
+	 */
+	public static $resque = null;
 
-        if (!($redis = Configure::read('CakeResque.Redis'))) {
-            throw new ConfigureException(__d('cake_resque', 'There is an error in the configuration file.'));
-        }
+	/**
+	 * Initialization.
+	 *
+	 * It loads the required classes for web and cli environments.
+	 *
+	 * @param array $config Configuration options.
+	 * @throws ConfigureException if needed configuration parameters are not found.
+	 * @return void
+	 */
+	public static function init($config = null)
+	{
+		$config = self::loadConfig($config);
 
-        if (
-            empty($redis['host']) ||
-            empty($redis['port']) ||
-            (empty($redis['database']) && !is_numeric($redis['database'])) ||
-            empty($redis['namespace'])
-        ) {
-            throw new ConfigureException(__d('cake_resque', 'There is an error in the Redis configuration key.'));
-        }
+		// if (!($redis = Configure::read('CakeResque.Redis'))) {
+		// 		throw new ConfigureException(__d('cake_resque', 'There is an error in the configuration file.'));
+		// }
 
-        Resque::setBackend($redis['host'] . ':' . $redis['port'], $redis['database'], $redis['namespace'], $redis['password']);
-    }
+		$redis = $config['Redis'];
 
-    /**
-     * Load configuration.
-     *
-     * If 'CakeResque' configuration key is not set, the default configuration is loaded.
-     *
-     * @param array $config Configuration options.
-     * @return void
-     */
-    public static function loadConfig($config = null)
-    {
-        if ($config !== null) {
-            Configure::write('CakeResque', $config);
-        }
+		if ((empty($redis['url'])) &&
+				(empty($redis['scheme']) && empty($redis['host']) && empty($redis['port'])) &&
+				(empty($redis['scheme']) && empty($redis['path'])) &&
+				(empty($redis['scheme']) && empty($redis['ssl']))) {
+			//throw new ConfigureException(__d('cake_resque', 'There is an error in the Redis configuration key.'));
+			throw new Exception('There is an error in the Redis configuration key.');
+		}
 
-        if (
-            ($hasCheck = method_exists('Configure', 'check')) && !Configure::check('CakeResque') ||
-            !$hasCheck && !self::checkConfig('CakeResque')
-        ) {
-            Configure::load('CakeResque.config');
-        }
-    }
+		self::$redis = new \Predis\Client($redis);
 
-    /**
-     * Returns true if given variable is set in Configure.
-     *
-     * Note: This is a mere port of Configure::check() implemented since CakePHP 2.3.
-     *
-     * @param string $var Variable name to check for
-     * @return boolean True if variable is there
-     * @see Configure::check()
-     */
-    public static function checkConfig($var = null)
-    {
-        if (empty($var)) {
-            return false;
-        }
+		self::$logger = new \Resque\Logger();
+		self::$logger->ansi(true);
+		self::$logger->extremely_verbose();
 
-        return Configure::read($var) !== null;
-    }
+		self::$resque = new \Resque\Resque(self::$redis);
+		self::$resque->setLogger(self::$logger);
+	}
 
-    /**
-     * Enqueue a Job and keep a log for debugging.
-     *
-     * @param string $queue Name of the queue to enqueue the job to.
-     * @param string $class Class of the job.
-     * @param array $args Arguments passed to the job.
-     * @param boolean $trackStatus Whether to track the status of the job.
-     * @return string Job Id.
-     */
-    public static function enqueue($queue, $class, $args = [], $trackStatus = null)
-    {
-        if ($trackStatus === null) {
-            $trackStatus = Configure::read('CakeResque.Job.track');
-        }
+	/**
+	 * Load configuration.
+	 *
+	 * If 'CakeResque' configuration key is not set, the default configuration is loaded.
+	 *
+	 * @param array $config Configuration options.
+	 * @return void
+	 */
+	public static function loadConfig($config = null)
+	{
+		return array(
+			'Redis' => array(
+				'scheme' => 'tcp',
+				'host' => '127.0.0.1',
+				'port' => 6379
+			)
+			// 'Redis' => array(
+			// 	'url' => 'tcp://127.0.0.1:6379'
+			// )
+			// 'Redis' => array(
+			// 	'scheme' => 'unix',
+			// 	'path' => '/path/to/redis.sock'
+			// )
+			// 'Redis' => array(
+			// 	'url' => 'unix:/path/to/redis.sock'
+			// )
+			// 'Redis' => array(
+			// 	'scheme' => 'tls',
+			// 	'ssl' => array(
+			// 		'cafile' => 'private.pem',
+			// 		'verify_peer' => true
+			// 	)
+			// )
+			// 'Redis' => array(
+			// 	'url' => 'tls://127.0.0.1?ssl[cafile]=private.pem&ssl[verify_peer]=1'
+			// )
+		);
 
-        if (!is_array($args)) {
-            $args = [$args];
-        }
+		// if ($config !== null) {
+		// 	Configure::write('CakeResque', $config);
+		// }
 
-        $r = call_user_func_array(self::$resqueClass . '::enqueue', array_merge([$queue], [$class], [$args], [$trackStatus]));
+		// if (($hasCheck = method_exists('Configure', 'check')) && !Configure::check('CakeResque') ||
+		// 		!$hasCheck && !self::checkConfig('CakeResque')) {
+		// 	Configure::load('CakeResque.config');
+		// }
+	}
 
-        if (defined('DEBUG_BACKTRACE_IGNORE_ARGS')) {
-            $caller = version_compare(PHP_VERSION, '5.4.0') >= 0
-                ? debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)
-                : debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-        } else {
-            $caller = debug_backtrace();
-        }
+	public static function getRedis()
+	{
+		return self::$redis;
+	}
 
-        self::$logs[ $queue ][] = [
-            'queue'  => $queue,
-            'class'  => $class,
-            'method' => array_shift($args),
-            'args'   => $args,
-            'jobId'  => $r,
-            'caller' => $caller,
-        ];
+	public static function getLogger()
+	{
+		return self::$logger;
+	}
 
-        return $r;
-    }
+	public static function getResque()
+	{
+		return self::$resque;
+	}
 
-    /**
-     * Enqueue a Job at a certain time.
-     *
-     * @param int|DateTime $at Timestamp or DateTime object giving the time when the job should be enqueued.
-     * @param string $queue Name of the queue to enqueue the job to.
-     * @param string $class Class of the job.
-     * @param array $args Arguments passed to the job.
-     * @param boolean $trackStatus Whether to track the status of the job.
-     * @since 2.3.0
-     * @return string Job Id.
-     */
-    public static function enqueueAt($at, $queue, $class, $args = [], $trackStatus = null)
-    {
-        if (Configure::read('CakeResque.Scheduler.enabled') !== true) {
-            return false;
-        }
+	/**
+	 * Enqueue a Job and keep a log for debugging.
+	 *
+	 * @param string $queue Name of the queue to enqueue the job to.
+	 * @param string $class Class of the job.
+	 * @param array $args Arguments passed to the job.
+	 * @param boolean $trackStatus Whether to track the status of the job.
+	 * @return string Job Id.
+	 */
+	public static function enqueue($queue, $class, $args = [], $track = null)
+	{
+		if ($track === null) {
+			//$track = Configure::read('CakeResque.Job.track');
+		}
 
-        if ($trackStatus === null) {
-            $trackStatus = Configure::read('CakeResque.Job.track');
-        }
+		if (!is_array($args)) {
+			$args = [$args];
+		}
 
-        if (!is_array($args)) {
-            $args = [$args];
-        }
+		//$id = call_user_func_array(self::$resqueClass . '::enqueue', array_merge([$queue], [$class], [$args], [$track]));
 
-        $r = call_user_func_array(self::$resqueSchedulerClass . '::enqueueAt', array_merge([$at], [$queue], [$class], [$args], [$trackStatus]));
+		$id = self::$resque->enqueue($queue, $class, $args, $track);
 
-        if (defined('DEBUG_BACKTRACE_IGNORE_ARGS')) {
-            $caller = version_compare(PHP_VERSION, '5.4.0') >= 0
-                ? debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)
-                : debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-        } else {
-            $caller = debug_backtrace();
-        }
+		if (defined('DEBUG_BACKTRACE_IGNORE_ARGS')) {
+			$caller = version_compare(PHP_VERSION, '5.4.0') >= 0
+				? debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)
+				: debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+		} else {
+			$caller = debug_backtrace();
+		}
 
-        self::$logs[ $queue ][] = [
-            'queue'  => $queue,
-            'class'  => $class,
-            'method' => array_shift($args),
-            'args'   => $args,
-            'jobId'  => $r,
-            'caller' => $caller,
-            'time'   => $at instanceof DateTime ? $at->getTimestamp() : $at,
-        ];
+		self::$logger->debug('queue: {queue}, class: {class}, args: {args}, jobId: {jobId}, caller: {caller}', array(
+			'queue'  => $queue,
+			'class'  => $class,
+			'args'   => json_encode($args),
+			'jobId'  => $id,
+			'caller' => json_encode($caller)
+		));
 
-        return $r;
-    }
+		return $id;
+	}
 
-    /**
-     * Enqueue a Job after a certain time.
-     *
-     * @param int $in Number of second to wait from now before queueing the job.
-     * @param string $queue Name of the queue to enqueue the job to.
-     * @param string $class Class of the job.
-     * @param array $args Arguments passed to the job.
-     * @param boolean $trackStatus Whether to track the status of the job.
-     * @since 2.3.0
-     * @return string Job Id.
-     */
-    public static function enqueueIn($in, $queue, $class, $args = [], $trackStatus = null)
-    {
-        if (Configure::read('CakeResque.Scheduler.enabled') !== true) {
-            return false;
-        }
-
-        if ($trackStatus === null) {
-            $trackStatus = Configure::read('CakeResque.Job.track');
-        }
-
-        if (!is_array($args)) {
-            $args = [$args];
-        }
-
-        $r = call_user_func_array(self::$resqueSchedulerClass . '::enqueueIn', array_merge([$in], [$queue], [$class], [$args], [$trackStatus]));
-
-        if (defined('DEBUG_BACKTRACE_IGNORE_ARGS')) {
-            $caller = version_compare(PHP_VERSION, '5.4.0') >= 0
-                ? debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)
-                : debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-        } else {
-            $caller = debug_backtrace();
-        }
-
-        self::$logs[ $queue ][] = [
-            'queue'  => $queue,
-            'class'  => $class,
-            'method' => array_shift($args),
-            'args'   => $args,
-            'jobId'  => $r,
-            'caller' => $caller,
-            'time'   => time() + $in,
-        ];
-
-        return $r;
-    }
-
-    /**
-     * Get the job status.
-     *
-     * @param string $jobId Job Id.
-     * @return int Job status.
-     * @see CakeResqueShell::track()
-     * @codeCoverageIgnore
-     */
-    public static function getJobStatus($jobId)
-    {
-        $JobStatus = new Resque_Job_Status($jobId);
-
-        return $JobStatus->get();
-    }
-
-    /**
-     * Get the failed job's log.
-     *
-     * @param string $jobId Job Id.
-     * @return array Array containint the failed job's log.
-     * @see CakeResqueShell::track()
-     * @codeCoverageIgnore
-     */
-    public static function getFailedJobLog($jobId)
-    {
-        return Resque_Failure_Redis::get($jobId);
-    }
-
-    /**
-     * Get all workers' instances.
-     *
-     * @return array Array of worker's instances.
-     * @see CakeResqueShell::cleanup()
-     * @see CakeResqueShell::pause()
-     * @see CakeResqueShell::stats()
-     * @see CakeResqueShell::stop()
-     * @codeCoverageIgnore
-     */
-    public static function getWorkers()
-    {
-        return (array)Resque_Worker::all();
-    }
-
-    /**
-     * Get the queues's names.
-     *
-     * @return array Array containing the queues' names.
-     * @see CakeResqueShell::clear()
-     * @see CakeResqueShell::stats()
-     * @codeCoverageIgnore
-     */
-    public static function getQueues()
-    {
-        return Resque::queues();
-    }
-
-    /**
-     * Clear all the queue's jobs.
-     *
-     * @param string $queue Queue name, e.g. 'default'.
-     * @return boolean True on success, false on failure.
-     * @see CakeResqueShell::clear()
-     * @codeCoverageIgnore
-     */
-    public static function clearQueue($queue)
-    {
-        return Resque::redis()->ltrim('queue:' . $queue, 1, 0);
-    }
-
-    /**
-     * Remove the queue from the queues.
-     *
-     * @param string $queue Queue name, e.g. 'default'.
-     * @return boolean True on success, false on failure.
-     * @see CakeResqueShell::clear()
-     * @see CakeResqueShell::stop()
-     * @codeCoverageIgnore
-     */
-    public static function removeQueue($queue)
-    {
-        return Resque::redis()->srem('queues', $queue);
-    }
-
-    /**
-     * Get the number of jobs inside a queue.
-     *
-     * @param string $queue Queue name, e.g. 'default'.
-     * @return int Number of jobs.
-     * @see CakeResqueShell::clear()
-     * @see CakeResqueShell::stats()
-     * @codeCoverageIgnore
-     */
-    public static function getQueueSize($queue)
-    {
-        return Resque::size($queue);
-    }
-
-    /**
-     * Get the worker start date.
-     *
-     * @param string $worker Worker name, e.g. 'localhost:30677:default'.
-     * @return string Worker start date, e.g. 'Tue Dec 03 10:07:35 ART 2013'.
-     * @see CakeResqueShell::_sendSignal()
-     * @see CakeResqueShell::stats()
-     * @codeCoverageIgnore
-     */
-    public static function getWorkerStartDate($worker)
-    {
-        return Resque::redis()->get('worker:' . $worker . ':started');
-    }
 }

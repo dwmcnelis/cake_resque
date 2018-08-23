@@ -1,0 +1,20 @@
+#!/usr/bin/env php
+<?php
+
+(@include_once __DIR__ . '/vendor/autoload.php') || @include_once __DIR__ . '/../../autoload.php';
+
+@include_once __DIR__ . '/config/bootstrap.php';
+
+$resque = CakeResque\CakeResque::getResque();
+
+$resque->log('Hello World!', 'debug');
+$resque->log('workers: '.join($resque->getWorkerIds(),','), 'debug');
+$resque->log('worker pids: '.join($resque->getWorkerPids(),','), 'debug');
+$resque->log('queues: '.join($resque->queues(),','), 'debug');
+$resque->log('queue: default size: '.$resque->size('default'), 'debug');
+
+// $id = $resque->enqueue('default', 'Resque\Jobs\AddJob', [1,22,333,4444]);
+// $resque->log('enqueued job: '.$id.', to default', 'debug');
+
+$id = CakeResque\CakeResque::enqueue('default', 'Resque\Jobs\AddJob', [1,22,333,4444]);
+$resque->log('enqueued job: '.$id.', to default', 'debug');

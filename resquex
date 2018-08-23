@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+(@include_once __DIR__ . '/vendor/autoload.php') || @include_once __DIR__ . '/../../autoload.php';
+
+$predis = new \Predis\Client(array(
+  'scheme' => 'tcp',
+  'host'   => '127.0.0.1',
+  'port'   => 6379
+));
+
+$logger = new \Resque\Logger();
+$logger->ansi(true);
+$logger->extremely_verbose();
+
+$resque = new \Resque\Resque($predis);
+$resque->setLogger($logger);
+$resque->log('Hello World!', 'debug');
+$resque->log('workers: '.join($resque->getWorkerIds(),','), 'debug');
+$resque->log('worker pids: '.join($resque->getWorkerPids(),','), 'debug');
+$resque->log('queues: '.join($resque->queues(),','), 'debug');
+$resque->log('queue: default size: '.$resque->size('default'), 'debug');
+
+$id = $resque->enqueue('default', 'Resque\Jobs\AddJob', [1,22,333,4444]);
+$resque->log('enqueued job: '.$id.', to default', 'debug');
